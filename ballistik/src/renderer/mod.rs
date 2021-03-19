@@ -1,48 +1,71 @@
-use vulkano::instance::Instance;
-use vulkano::instance::InstanceExtensions;
-use vulkano::instance::PhysicalDevice;
-use vulkano::device::Device;
-use vulkano::device::DeviceExtensions;
-use vulkano::device::Features;
+use vulkano::{device::QueuesIter, instance::{Instance, InstanceExtensions, PhysicalDevice}};
+use vulkano::device::{ Device, Features };
 
-use std::sync::Arc;
-pub mod context;
+use std::{io::Write, sync::Arc};
 
-pub struct Renderer
-{
-    instance: Arc<Instance>,
+/// Context.
+pub struct Context {
+
+    /// Instance extensions.
+    pub instance_extensions: InstanceExtensions,
+
+    /// Instance.
+    pub instance: Arc<Instance>,
+
+    /// Logical device.
+    pub device: Arc<Device>,
+
+    /// Queues.
+    pub queues: QueuesIter,
 }
 
-impl Renderer
-{
-    pub fn new() -> Renderer {
+impl Context {
 
-        let instance = Instance::new(None, &InstanceExtensions::none(), None)
+    pub fn new() -> Context {
+        
+        // Get instance extensions.
+        let instance_extensions : InstanceExtensions = vulkano_win::required_extensions();
+
+        // Create Vulkan instance.
+        let instance = Instance::new(None, &instance_extensions, None)
             .expect("failed to create instance");
 
-        let physical = PhysicalDevice::enumerate(&instance)
-        .next().expect("no device available");
+        // Select physical device.
+        let physical_device = PhysicalDevice::enumerate(&instance)
+            .next()
+            .expect("no device available");
 
-        let queue_family = physical
+        // Select queue families.
+        let queue_family = physical_device
             .queue_families()
             .find(|&q| q.supports_graphics())
             .expect("couldn't find a graphical queue family");
 
+        // Create logical Vulkan device.
         let (device, mut queues) = 
         {
+            // Setup device extensions.
+            let device_extensions = vulkano::device::DeviceExtensions {
+                khr_swapchain: true,
+                .. vulkano::device::DeviceExtensions::none()
+            };
+
             Device::new(
-                physical, 
+                physical_device, 
                 &Features::none(), 
-                &DeviceExtensions::none(),
+                &device_extensions,
                 [(queue_family, 0.5)].iter().cloned())
                 .expect("failed to create device")
         };
 
-        Renderer 
+        let queue = queues.next();
+
+        return Context
         {
-            instance: instance,
+            instance_extensions,
+            instance,
+            device,
+            queues,
         }
     }
-
 }
-

@@ -1,10 +1,10 @@
 pub mod views;
 pub mod renderer;
-pub mod renderer;
+pub mod window;
+pub mod swapchain;
 
 /// Ballistik system.
 pub struct Ballistik {
-    renderer: renderer::Renderer,
 }
 
 impl Ballistik {
@@ -13,7 +13,7 @@ impl Ballistik {
     pub fn new() -> Ballistik {
         Ballistik 
         {
-            renderer: renderer::Renderer::new(),
+            
         }
     }
 
