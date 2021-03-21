@@ -5,7 +5,6 @@ use vulkano::swapchain::Surface;
 use vulkano_win::VkSurfaceBuild;
 
 use std::sync::Arc;
-use crate::renderer;
 
 /// Window context.
 pub struct Context {
@@ -19,7 +18,7 @@ pub struct Context {
 
 impl Context 
 {
-    pub fn new(context: &renderer::Context) -> Context {
+    pub fn new(context: &crate::graphics::Context) -> Self {
 
         let event_loop = EventLoop::new();
         let surface = WindowBuilder::new()
@@ -28,8 +27,8 @@ impl Context
 
         Context
         {
-            event_loop: event_loop,
-            surface: surface,
+            event_loop,
+            surface,
         }
     }
 }
