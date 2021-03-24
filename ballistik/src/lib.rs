@@ -12,11 +12,12 @@ use winit::{
 
 /// Ballistik system.
 pub struct Ballistik {
-    pub renderer_context: renderer::Context,
-    pub graphics_context: graphics::Context,
-    pub window_context: window::Context,
+    renderer_context: renderer::Context,
+    graphics_context: graphics::Context,
+    window_context: window::Context,
 
-    tree: views::tree::Tree,
+    views: Vec<Box<dyn View>>,
+    //tree: views::tree::Tree,
 }
 
 impl Ballistik {
@@ -34,33 +35,39 @@ impl Ballistik {
             graphics_context,
             renderer_context,
             window_context,
-            tree,
+            views: Vec::new(),
         }
     }
 
     pub fn add_view(&mut self, view: Box<dyn views::View>) {
-        self.tree.root_mut().add_view(view);
+        //self.tree.root_mut().add_view(view);
+        self.views.push(view);
     }
 
     /// Run ballistik.
     pub fn run(self) -> () {
 
-        let proxy = self.window_context.event_loop.create_proxy();
+        let mut render_context = renderer::RenderContext::start(&self.renderer_context);
 
-        println!("Event loop is running ...");
+        render_context.end();
 
-        self.window_context.event_loop.run(move |event, _, control_flow| {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
 
-            *control_flow = ControlFlow::Wait;
+            println!("Event loop is running ...");
 
-            match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    window_id,
-                } => *control_flow = ControlFlow::Exit,
-                _ => (),
-            }
-
+            self.window_context.event_loop.run(move |event, _, control_flow| {
+    
+                *control_flow = ControlFlow::Wait;
+                
+                match event {
+                    Event::WindowEvent {
+                        event: WindowEvent::CloseRequested,
+                        window_id,
+                    } => *control_flow = ControlFlow::Exit,
+                    _ => (),
+                }
+            });
         });
     }
 }

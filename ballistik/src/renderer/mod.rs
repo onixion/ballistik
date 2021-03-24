@@ -1,14 +1,26 @@
-use vulkano::{device::Queue, instance::{PhysicalDevice}, sync::SharingMode};
+use vulkano::{command_buffer::SubpassContents, device::Queue, instance::{PhysicalDevice}, sync::SharingMode};
 use vulkano::device::{Device, Features, DeviceOwned };
 use winit::window::{ Window };
 use vulkano::swapchain::{Swapchain, SurfaceTransform, PresentMode, ColorSpace, FullscreenExclusive};
 use vulkano::image::ImageUsage;
 use vulkano::framebuffer::{RenderPassAbstract};
 use vulkano::format::Format;
+use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::vertex::SingleBufferDefinition;
+use vulkano::descriptor::PipelineLayoutAbstract;
+use vulkano::command_buffer::AutoCommandBufferBuilder;
+use vulkano::command_buffer::pool::standard::StandardCommandPoolBuilder;
+use vulkano::framebuffer::Framebuffer;
+use vulkano::swapchain;
+use vulkano::image::swapchain::SwapchainImage;
+use vulkano::swapchain::SwapchainAcquireFuture;
+use vulkano::command_buffer::traits::CommandBuffer;
 
-use vulkano::pipeline::{GraphicsPipeline};
 use vulkano::framebuffer::Subpass;
 use std::sync::Arc;
+
+pub mod shaders;
+use shaders::default::Vertex;
 
 /// Context.
 pub struct Context {
@@ -20,7 +32,7 @@ pub struct Context {
     swapchain: Arc<Swapchain<Window>>,
 
     /// Images of the swapchain.
-    //images: Vec<Arc<SwapchainImage<Window>>>,
+    images: Vec<Arc<SwapchainImage<Window>>>,
 
     /// Render pass.
     render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
@@ -30,10 +42,15 @@ pub struct Context {
 
     /// Transfer queue.
     transfer_queue: Arc<Queue>,
+
+    /// Graphics pipeline,
+    default_pipeline: Arc<GraphicsPipeline<SingleBufferDefinition<Vertex>, Box<dyn PipelineLayoutAbstract + Send + Sync>, Arc<dyn RenderPassAbstract + Send + Sync>>>,
 }
 
+///! Render context.
 impl Context {
 
+    ///! New.
     pub fn new(
         graphics_context: &crate::graphics::Context, 
         window_context: &crate::window::Context) -> Self {
@@ -86,14 +103,16 @@ impl Context {
 
         let dimensions = caps.current_extent.unwrap_or([1280, 1024]);
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-        let format = caps.supported_formats[0].0;
+        let format = caps.supported_formats[1];
+
+        println!("################ {:?}", format);
 
         // Create swapchain and images.
-        let (swapchain, _images) = Swapchain::new(
+        let (swapchain, images) = Swapchain::new(
             device.clone(), 
             window_context.surface.clone(),
             caps.min_image_count, 
-            format, 
+            format.0, 
             dimensions, 
             1, 
             ImageUsage::color_attachment(), 
@@ -103,7 +122,7 @@ impl Context {
             PresentMode::Fifo, 
             FullscreenExclusive::Default,
             true, 
-            ColorSpace::SrgbNonLinear)
+            format.1)
             .expect("failed to create swapchain");
 
         // ----------------------------------------------------------------
@@ -114,7 +133,7 @@ impl Context {
                 color: {
                     load: Clear,
                     store: Store,
-                    format: Format::R8G8B8A8Unorm,
+                    format: Format::B8G8R8A8Srgb,
                     samples: 1,
                 }
             },
@@ -129,72 +148,29 @@ impl Context {
         // ----------------------------------------------------------------
         // Create graphics pipeline.
 
-        mod vs {
-            vulkano_shaders::shader!{
-                ty: "vertex",
-                src: "
-#version 450
-        
-layout(location = 0) in vec2 position;
-        
-void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
-}"
-            }
-        }
-        
-        mod fs {
-            vulkano_shaders::shader!{
-                ty: "fragment",
-                src: "
-#version 450
-        
-layout(location = 0) out vec4 f_color;
-        
-void main() {
-    f_color = vec4(1.0, 0.0, 0.0, 1.0);
-}"
-            }
-        }
-        
-        let vs = vs::Shader::load(device.clone()).expect("failed to create shader module");
-        let fs = fs::Shader::load(device.clone()).expect("failed to create shader module");
-
-        #[derive(Default, Copy, Clone)]
-        struct Vertex {
-            position: [f32; 2],
-        }
-        
-        vulkano::impl_vertex!(Vertex, position);
-
-        let _graphics_pipeline = GraphicsPipeline::start()
-            // Defines what kind of vertex input is expected.
-            .vertex_input_single_buffer::<Vertex>()
-            // The vertex shader.
-            .vertex_shader(vs.main_entry_point(), ())
-            // Defines the viewport (explanations below).
-            .viewports_dynamic_scissors_irrelevant(1)
-            // The fragment shader.
-            .fragment_shader(fs.main_entry_point(), ())
-            // This graphics pipeline object concerns the first pass of the render pass.
-            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            // Now that everything is specified, we call `build`.
-            .build(device.clone())
-            .unwrap();
+        let default_pipeline = self::shaders::default::create(
+            device.clone(),
+            render_pass.clone()
+        );
 
         return Context
         {
             device,
             swapchain,
-            //images,
+            images,
             render_pass,
-            graphics_queue: queues.next().expect("msg"),
-            transfer_queue:queues.next().expect("msg"),
+            graphics_queue: queues.next().expect("no graphics queue"),
+            transfer_queue: queues.next().expect("no transfer queue"),
+            default_pipeline: Arc::new(default_pipeline),
         }
     }
 
     pub fn swapchain(&self) -> &Arc<Swapchain<Window>> {
         &self.swapchain
+    }
+
+    pub fn images(&self) -> &Vec<Arc<SwapchainImage<Window>>> {
+        &self.images
     }
 
     pub fn render_pass(&self) -> &Arc<dyn RenderPassAbstract + Send + Sync> {
@@ -208,6 +184,10 @@ void main() {
     pub fn transfer_queue(&self) -> &Arc<Queue> {
         &self.transfer_queue
     }
+
+    pub fn default_pipeline(&self)-> &Arc<GraphicsPipeline<SingleBufferDefinition<Vertex>, Box<dyn PipelineLayoutAbstract + Send + Sync>, Arc<dyn RenderPassAbstract + Send + Sync>>> {
+        &self.default_pipeline
+    }
 }
 
 unsafe impl DeviceOwned for Context
@@ -215,4 +195,63 @@ unsafe impl DeviceOwned for Context
     fn device(&self) -> &Arc<Device> {
         &self.device
     }
+}
+
+pub struct RenderContext {
+    pub builder: AutoCommandBufferBuilder<StandardCommandPoolBuilder>,
+    acquire_future: SwapchainAcquireFuture<Window>,
+}
+
+impl RenderContext {
+
+    pub fn start(context: &Context) -> RenderContext {
+
+        let (image_num, b, acquire_future) = swapchain::acquire_next_image(
+            context.swapchain().clone(), 
+            None
+        ).unwrap();
+
+        let image = context.images()[image_num].clone();
+
+        let framebuffer = Arc::new(
+            Framebuffer::start(
+                context.render_pass().clone()
+            )
+            .add(image.clone())
+            .unwrap()
+            .build()
+            .unwrap()
+        );
+
+        let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(
+            context.device().clone(), 
+            context.graphics_queue().family()
+        ).unwrap();
+
+        builder
+            .begin_render_pass(
+                framebuffer.clone(), 
+                SubpassContents::Inline, 
+                vec![[0.0, 0.0, 1.0, 1.0].into()])
+            .unwrap();
+
+        RenderContext {
+            builder,
+            acquire_future,
+        }
+    }
+
+    pub fn end(&mut self) -> () {
+
+        let mut command_buffer = self.builder
+            .end_render_pass()
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let finished = command_buffer.execute(self.graphics_queue().clone()).unwrap();
+        finished.then_signal_fence_and_flush().unwrap().wait(None).unwrap();
+
+    }
+
 }

@@ -3,6 +3,9 @@ use super::super::View;
 ///! View node.
 pub struct Node {
 
+    ///! Dirty flag.
+    dirty: bool,
+
     ///! View.
     view: Option<Box<dyn View>>,
 
@@ -14,9 +17,14 @@ impl Node {
 
     pub fn new(view: Box<dyn View>) -> Node {
         Node {
+            dirty: true,
             view: Option::Some(view),
             children: Vec::<Node>::new(),
         }
+    }
+
+    pub fn dirty(&self) -> bool {
+        self.dirty
     }
 
     pub fn view(&self) -> &Option<Box<dyn View>> {
@@ -34,7 +42,6 @@ impl Node {
     }
 
     pub fn remove_view(&mut self, view: &Box<dyn View>) {
-
         
     }
 }
@@ -43,6 +50,7 @@ impl Default for Node {
 
     fn default() -> Self {
         Node {
+            dirty: true,
             view: Option::None,
             children: Vec::<Node>::new(),
         }
